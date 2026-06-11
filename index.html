@@ -195,6 +195,11 @@ header p{color:var(--text-dim);font-size:0.78rem;margin-top:4px;}
     <label class="toggle"><input type="checkbox" id="shuffleToggle"><div class="toggle-slider"></div></label>
     🔀 シャッフル
     <button class="download-btn" id="reshuffleBtn" style="margin-left:10px;padding:6px 10px;" onclick="reshuffleCurrent()">🔁 再シャッフル</button>
+    <label style="margin-left:8px;color:var(--text-dim);display:flex;align-items:flex-start;gap:8px;">
+      <div style="font-size:0.85rem;color:var(--text-dim);margin-top:4px;">対象（複数選択可）：</div>
+      <div id="shuffleSectionContainer" style="display:flex;flex-direction:column;gap:6px;background:var(--surface);border:1px solid var(--border);padding:8px;border-radius:6px;max-height:160px;overflow:auto;min-width:180px"></div>
+    </label>
+    <button class="download-btn" id="playSectionAllBtn" style="margin-left:8px;padding:6px 10px;" onclick="playSectionAllShuffled()">▶ セクション全語をシャッフル再生</button>
   </div>
 
   <div class="nav-row">
@@ -405,6 +410,24 @@ function showPlayer(){
     const opt=document.createElement('option'); opt.value=name;
     opt.textContent=name+' ('+VOCAB[name].length+'語)'; sel.appendChild(opt);
   });
+  // populate shuffle target checkbox list (allow multiple)
+  const shuffleContainer = document.getElementById('shuffleSectionContainer');
+  if(shuffleContainer){
+    shuffleContainer.innerHTML = '';
+    const names = Object.keys(VOCAB);
+    names.forEach((name,idx)=>{
+      const id = 'shuffle_chk_' + idx;
+      const label = document.createElement('label');
+      label.style.display = 'flex'; label.style.alignItems = 'center'; label.style.gap = '8px';
+      label.style.cursor = 'pointer';
+      const cb = document.createElement('input'); cb.type = 'checkbox'; cb.id = id; cb.value = name; cb.style.margin = '0';
+      // check current section by default
+      if(name === currentSection) cb.checked = true;
+      const span = document.createElement('span'); span.style.color = 'var(--text)'; span.style.fontSize='0.9rem'; span.textContent = name + ' ('+VOCAB[name].length+'語)';
+      label.appendChild(cb); label.appendChild(span);
+      shuffleContainer.appendChild(label);
+    });
+  }
   document.getElementById('autoNextToggle').onchange=e=>{autoNext=e.target.checked;};
   document.getElementById('shuffleToggle').onchange=e=>{ shuffleMode=e.target.checked; applyFilterAndShuffle(); };
   changeSection();
@@ -443,6 +466,31 @@ function reshuffleCurrent(){
   currentWords=VOCAB[currentSection].filter(it=>!it.checked).map(x=>x);
   shuffle(currentWords);
   currentIndex=0; renderCard();
+}
+
+// Play all words in the selected section (ignore checked/excluded flags), shuffled.
+function playSectionAllShuffled(sectionArg){
+  // support multiple selected sections via the multi-select; fallback to single currentSection
+  const container = document.getElementById('shuffleSectionContainer');
+  let selected = [];
+  if(container){ selected = Array.from(container.querySelectorAll('input[type=checkbox]:checked')).map(i=>i.value); }
+  if(sectionArg && !selected.length) selected = Array.isArray(sectionArg)? sectionArg : [sectionArg];
+  if(!selected.length){ if(currentSection) selected = [currentSection]; }
+  // build combined word list from selected sections
+  const words = [];
+  selected.forEach(sec => { if(VOCAB[sec] && VOCAB[sec].length) words.push(...VOCAB[sec].map(x=>x)); });
+  if(!words.length){ setStatus('idle','再生する単語がありません'); return; }
+  stopSpeech();
+  // set UI to reflect first chosen section
+  currentSection = selected[0];
+  const mainSel = document.getElementById('sectionSelect'); if(mainSel) mainSel.value = currentSection;
+  // use all words regardless of checked state
+  currentWords = words;
+  shuffle(currentWords);
+  currentIndex = 0; stepIndex = 0;
+  isPlaying = true; updatePlayBtn();
+  renderCard();
+  playCurrentWord();
 }
 
 function switchTab(name){
@@ -611,7 +659,9 @@ function playCurrentWord(){
     }
     stepIndex = i; renderCard(); setStatus('speaking', seq[i].status);
     speak(seq[i].text, seq[i].lang, ()=>{
-      const ms = seq[i].after || 0;
+      // add extra one-beat pause (600ms) when in single-language modes (英語のみ / 日本語のみ)
+      let ms = seq[i].after || 0;
+      if(speakMode==='en' || speakMode==='ja') ms += 600;
       if(ms>0) wait(ms, ()=> playSeqAt(i+1));
       else playSeqAt(i+1);
     });
