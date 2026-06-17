@@ -351,6 +351,24 @@ function loadCSVFromStorage(id){
   try{ return localStorage.getItem('vocab-player:csv:'+id); }catch(e){ return null; }
 }
 
+// persist/load shuffle-section selections per CSV file
+function saveShuffleSelectionToStorage(){
+  if(!currentFileId) return;
+  try{
+    const container = document.getElementById('shuffleSectionContainer');
+    const selected = container ? Array.from(container.querySelectorAll('input[type=checkbox]:checked')).map(i=>i.value) : [];
+    localStorage.setItem('vocab-player:shuffle:'+currentFileId, JSON.stringify(selected));
+  }catch(e){ console.warn('saveShuffleSelectionToStorage failed', e); }
+}
+
+function loadShuffleSelectionFromStorage(id){
+  try{
+    const raw = localStorage.getItem('vocab-player:shuffle:'+id);
+    if(!raw) return [];
+    return JSON.parse(raw || '[]');
+  }catch(e){ console.warn('loadShuffleSelectionFromStorage failed', e); return []; }
+}
+
 function restoreLastCSV(){
   const id = localStorage.getItem('vocab-player:last');
   if(!id){ showError('復元するCSVが見つかりません'); return; }
@@ -415,18 +433,24 @@ function showPlayer(){
   if(shuffleContainer){
     shuffleContainer.innerHTML = '';
     const names = Object.keys(VOCAB);
+    // load saved selections for this CSV (if any)
+    const saved = currentFileId ? loadShuffleSelectionFromStorage(currentFileId) : [];
     names.forEach((name,idx)=>{
       const id = 'shuffle_chk_' + idx;
       const label = document.createElement('label');
       label.style.display = 'flex'; label.style.alignItems = 'center'; label.style.gap = '8px';
       label.style.cursor = 'pointer';
       const cb = document.createElement('input'); cb.type = 'checkbox'; cb.id = id; cb.value = name; cb.style.margin = '0';
-      // check current section by default
-      if(name === currentSection) cb.checked = true;
+      // check saved selection or default to currentSection
+      if(saved.length>0) cb.checked = saved.includes(name);
+      else if(name === currentSection) cb.checked = true;
+      cb.onchange = ()=>{ saveShuffleSelectionToStorage(); };
       const span = document.createElement('span'); span.style.color = 'var(--text)'; span.style.fontSize='0.9rem'; span.textContent = name + ' ('+VOCAB[name].length+'語)';
       label.appendChild(cb); label.appendChild(span);
       shuffleContainer.appendChild(label);
     });
+    // ensure saved selection exists in storage (create empty if none)
+    if(currentFileId && saved.length===0) saveShuffleSelectionToStorage();
   }
   document.getElementById('autoNextToggle').onchange=e=>{autoNext=e.target.checked;};
   document.getElementById('shuffleToggle').onchange=e=>{ shuffleMode=e.target.checked; applyFilterAndShuffle(); };
@@ -476,9 +500,9 @@ function playSectionAllShuffled(sectionArg){
   if(container){ selected = Array.from(container.querySelectorAll('input[type=checkbox]:checked')).map(i=>i.value); }
   if(sectionArg && !selected.length) selected = Array.isArray(sectionArg)? sectionArg : [sectionArg];
   if(!selected.length){ if(currentSection) selected = [currentSection]; }
-  // build combined word list from selected sections
+  // build combined word list from selected sections, respecting per-word exclusion (checked)
   const words = [];
-  selected.forEach(sec => { if(VOCAB[sec] && VOCAB[sec].length) words.push(...VOCAB[sec].map(x=>x)); });
+  selected.forEach(sec => { if(VOCAB[sec] && VOCAB[sec].length) words.push(...VOCAB[sec].filter(it=>!it.checked).map(x=>x)); });
   if(!words.length){ setStatus('idle','再生する単語がありません'); return; }
   stopSpeech();
   // set UI to reflect first chosen section
